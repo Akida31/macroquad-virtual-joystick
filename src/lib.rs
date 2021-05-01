@@ -20,8 +20,7 @@
 //!
 //!         draw_circle(position.x, position.y, 50., YELLOW);
 //!
-//!         //next_frame().await
-//!         break;
+//!         next_frame().await
 //!     }
 //! }
 //! ```

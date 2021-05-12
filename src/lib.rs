@@ -20,15 +20,20 @@
 //!
 //!         draw_circle(position.x, position.y, 50., YELLOW);
 //!
+//!         joystick.render();
 //!         next_frame().await
 //!     }
 //! }
 //! ```
+#![warn(missing_docs)]
 
 use macroquad::prelude::{
-    draw_circle, is_mouse_button_down, mouse_position, touches, Color, MouseButton, TouchPhase,
-    Vec2,
+    color_u8, draw_circle, is_mouse_button_down, mouse_position, touches, Color, MouseButton,
+    TouchPhase, Vec2,
 };
+
+static BACKGROUND_COLOR: Color = color_u8!(96, 128, 144, 128);
+static KNOB_COLOR: Color = color_u8!(96, 128, 144, 168);
 
 /// The joystick component
 ///
@@ -50,7 +55,7 @@ pub struct Joystick {
     knob: JoystickElement,
     dragging: bool,
     touch_id: u64,
-    event: JoystickDirectionalEvent,
+    event: JoystickEvent,
 }
 
 impl Joystick {
@@ -69,67 +74,92 @@ impl Joystick {
     /// let joystick = Joystick::new(center_x, center_y, size);
     /// ```
     pub fn new(x: f32, y: f32, size: f32) -> Self {
-        Self::from_custom_elements(x, y, size, None, None)
+        let background_fn = Box::new(|center_x: f32, center_y: f32, radius: f32| {
+            draw_circle(center_x, center_y, radius, BACKGROUND_COLOR);
+        });
+        let background = JoystickElement::new(x, y, size / 2., background_fn);
+        let knob_fn = Box::new(|center_x: f32, center_y: f32, radius: f32| {
+            draw_circle(center_x, center_y, radius, KNOB_COLOR);
+        });
+        let knob = JoystickElement::new(x, y, size / 4., knob_fn);
+
+        Self {
+            center: Vec2::new(x, y),
+            size,
+            background,
+            knob,
+            dragging: false,
+            touch_id: 0,
+            event: JoystickEvent::default(),
+        }
     }
 
     /// create a new [`Joystick`] with custom elements for background and knob
     ///
     /// # Arguments
     /// * `x`, `y`: center of the joystick
-    /// `size`: diameter of the joystick, should have the same size as the background element
-    /// * `background`, `knob`: custom elements
+    /// * `size`: diameter of the joystick, should have the same size as the background element
+    /// * `knob_size`: diameter of the knob, should have the same size as the background element
+    /// * `render_background`, `render_knob`: custom drawing functions with the following
+    ///  arguments:
+    ///   * `x` the x coordinate of the center of the component
+    ///   * `y` the y coordinate of the center of the component
+    ///   * `radius` the radius used for mouse/ touch collision
+    ///     for good UX this should also be the size of the drawing
     ///
     /// # Examples
     /// ```
-    /// use macroquad::prelude::Color;
-    /// use macroquad_virtual_joystick::{Joystick, JoystickElement};
+    /// use macroquad::prelude::*;
+    /// use macroquad_virtual_joystick::Joystick;
     ///
-    /// let center_x = 100.0;
-    /// let center_y = 50.0;
-    /// let radius = 50.0;
-    /// let background_color = Color::from_rgba(255, 0, 0, 255);
-    /// let knob_color = Color::from_rgba(0, 255, 0, 255);
+    /// fn render_background(x: f32, y: f32, radius: f32) {
+    ///     draw_circle(x, y, radius, RED);
+    /// }
     ///
-    /// // create the background element
-    /// let background = JoystickElement::new(
-    ///     center_x,
-    ///     center_y,
-    ///     radius,
-    ///     background_color,
-    /// );
+    /// fn render_knob(x: f32, y: f32, radius: f32) {
+    ///     draw_circle(x, y, radius, GREEN);
+    /// }
     ///
-    /// // create the knob element
-    /// let knob = JoystickElement::new(
-    ///     center_x,
-    ///     center_y,
-    ///     radius * 0.75,
-    ///     knob_color,
-    /// );
+    /// #[macroquad::main("Custom Joystick")]
+    /// async fn main() {
+    ///     const SPEED: f32 = 2.5;
+    ///     let mut position = Vec2::new(screen_width() / 2.0, screen_height() / 4.0);
     ///
-    /// let joystick = Joystick::from_custom_elements(
-    ///     center_x,
-    ///     center_y,
-    ///     radius * 2.0,
-    ///     Some(background),
-    ///     Some(knob),
-    /// );
+    ///     let background_size = 50.0;
+    ///     let knob_size = 32.0;
+    ///
+    ///     let mut joystick = Joystick::from_custom_elements(
+    ///         100.0,
+    ///         200.0,
+    ///         background_size,
+    ///         knob_size,
+    ///         Box::new(render_background),
+    ///         Box::new(render_knob),
+    ///     );
+    ///     loop {
+    ///         clear_background(WHITE);
+    ///
+    ///         let joystick_event = joystick.update();
+    ///         position += joystick_event.direction.to_local() * joystick_event.intensity * SPEED;
+    ///
+    ///         draw_circle(position.x, position.y, 50.0, YELLOW);
+    ///
+    ///         joystick.render();
+    ///         next_frame().await
+    ///     }
+    /// }
     /// ```
     pub fn from_custom_elements(
         x: f32,
         y: f32,
         size: f32,
-        background: Option<JoystickElement>,
-        knob: Option<JoystickElement>,
+        knob_size: f32,
+        render_background: Box<fn(f32, f32, f32)>,
+        render_knob: Box<fn(f32, f32, f32)>,
     ) -> Self {
-        let radius = size / 2.;
         let center = Vec2::new(x, y);
-
-        let background = background.unwrap_or_else(|| {
-            JoystickElement::new(x, y, radius, Color::from_rgba(96, 125, 139, 128))
-        });
-        let knob = knob.unwrap_or_else(|| {
-            JoystickElement::new(x, y, radius / 2., Color::from_rgba(96, 125, 139, 168))
-        });
+        let background = JoystickElement::new(x, y, size / 2., render_background);
+        let knob = JoystickElement::new(x, y, knob_size / 2., render_knob);
 
         Self {
             center,
@@ -138,12 +168,16 @@ impl Joystick {
             knob,
             dragging: false,
             touch_id: 0,
-            event: JoystickDirectionalEvent::default(),
+            event: JoystickEvent::default(),
         }
     }
 
+    /// render the joystick
+    ///
     /// renders the background and knob
-    fn render(&self) {
+    ///
+    /// call [`macroquad::prelude::set_default_camera()`] before!
+    pub fn render(&self) {
         self.background.render();
         self.knob.render();
     }
@@ -197,34 +231,32 @@ impl Joystick {
         self.dragging = false;
         self.knob.x = self.center.x;
         self.knob.y = self.center.y;
-        self.event = JoystickDirectionalEvent::default();
+        self.event = JoystickEvent::default();
     }
 
     /// update the joystick
     ///
-    /// this updates the joystick and renders it
-    /// returns the current [`JoystickDirectionalEvent`]
+    /// this updates the joystick and returns the current [`JoystickEvent`]
     ///
     /// # Examples
     /// see [`Joystick`]
-    pub fn update(&mut self) -> JoystickDirectionalEvent {
-        if touches().len() > 0 {
-            self.update_touch();
-        } else {
+    pub fn update(&mut self) -> JoystickEvent {
+        if touches().is_empty() {
             self.update_mouse();
+        } else {
+            self.update_touch();
         }
-        self.render();
         self.event
     }
 
     /// move the knob according to the drag position and update the [`self.event`]
     fn moving(&mut self, position: Vec2) {
+        let radius = self.size / 2.;
         let delta = position - self.center;
         let angle = delta.y.atan2(delta.x);
         let angle_degrees = angle.to_degrees();
-        let radius = self.size / 2.;
 
-        // maximum distance for the knob
+        // maximum distance for the knob is the radius of the background
         let dist = f32::min(delta.length(), radius);
 
         self.knob.x = self.center.x + dist * angle.cos();
@@ -236,55 +268,37 @@ impl Joystick {
         } else {
             JoystickDirection::from_degrees(angle_degrees as f64)
         };
-        self.event = JoystickDirectionalEvent::new(direction, intensity, angle);
+        self.event = JoystickEvent::new(direction, intensity, angle);
     }
 }
 
 /// element of the [`Joystick`]
 ///
 /// can be used for the background or the knob
-pub struct JoystickElement {
+struct JoystickElement {
     x: f32,
     y: f32,
     radius: f32,
-    color: Color,
+    drawable: Box<dyn Fn(f32, f32, f32)>,
 }
 
 impl JoystickElement {
-    /// create a new [`JoystickElement`]
-    ///
-    /// # Examples
-    /// ```
-    /// use macroquad::prelude::Color;
-    /// use macroquad_virtual_joystick::JoystickElement;
-    ///
-    /// let center_x = 50.0;
-    /// let center_y = 100.0;
-    /// let radius = 30.0;
-    /// let background_color = Color::from_rgba(255, 0, 0, 255);
-    ///
-    /// let background = JoystickElement::new(
-    ///     center_x,
-    ///     center_y,
-    ///     radius,
-    ///     background_color,
-    /// );
-    /// ```
-    pub fn new(x: f32, y: f32, radius: f32, color: Color) -> Self {
+    fn new(x: f32, y: f32, radius: f32, drawable: Box<dyn Fn(f32, f32, f32)>) -> Self {
         Self {
             x,
             y,
             radius,
-            color,
+            drawable,
         }
     }
 
     /// render the element
     pub fn render(&self) {
-        draw_circle(self.x, self.y, self.radius, self.color);
+        (self.drawable)(self.x, self.y, self.radius);
     }
 }
 
+#[allow(missing_docs)]
 /// different directions of the [`Joystick`]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum JoystickDirection {
@@ -367,7 +381,7 @@ impl JoystickDirection {
 ///
 /// call [`Joystick::update`] to get the current event
 #[derive(Clone, Copy, Debug)]
-pub struct JoystickDirectionalEvent {
+pub struct JoystickEvent {
     /// the direction to which the knob was moved
     pub direction: JoystickDirection,
 
@@ -380,7 +394,7 @@ pub struct JoystickDirectionalEvent {
     pub angle: f32,
 }
 
-impl JoystickDirectionalEvent {
+impl JoystickEvent {
     fn new(direction: JoystickDirection, intensity: f32, angle: f32) -> Self {
         Self {
             direction,
@@ -390,7 +404,7 @@ impl JoystickDirectionalEvent {
     }
 }
 
-impl Default for JoystickDirectionalEvent {
+impl Default for JoystickEvent {
     fn default() -> Self {
         Self {
             direction: JoystickDirection::Idle,

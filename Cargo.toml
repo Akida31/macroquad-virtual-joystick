@@ -1,6 +1,6 @@
 [package]
 name = "macroquad-virtual-joystick"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["akida31 <akida3@protonmail.com>"]
 edition = "2018"
 description = "simple joystick for macroquad games"

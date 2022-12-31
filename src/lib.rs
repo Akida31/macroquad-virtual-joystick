@@ -336,7 +336,7 @@ impl JoystickDirection {
             Self::Down
         } else if degrees > 112.5 && degrees <= 157.5 {
             Self::DownLeft
-        } else if degrees > 157.5 && degrees <= 180. {
+        } else if (degrees > 157.5 && degrees <= 180.) || (degrees > -180. && degrees <= -157.5)  {
             Self::Left
         } else if degrees > -157.5 && degrees <= -112.5 {
             Self::UpLeft
